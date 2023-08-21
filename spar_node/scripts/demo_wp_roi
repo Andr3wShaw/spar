@@ -253,15 +253,29 @@ def main(args):
 	# Initialise ROS
 	rospy.init_node('guidance')
 
-	# List of waypoints
-	# [X, Y, Z, Yaw]
-	wps = [[ 0.0, 0.0, 1.0, 0.0],
-		   [ 1.0, 1.0, 1.0, 0.0],
-		   [-1.0, 1.0, 1.0, 0.0],
-		   [-1.0,-1.0, 1.0, 0.0],
-		   [ 1.0,-1.0, 1.0, 0.0],
-		   [ 0.0, 0.0, 1.0, 0.0]]
+	altitude = 2
 
+	half_vfov = altitude*0.509525 #Half of 2atan(vfovTheta)
+
+	wp_2lanes = [
+    	[ -4 + half_vfov, -1.25, altitude, 0.0],
+    	[ 4 - half_vfov, -1.25, altitude, 0.0],
+    	[ 4 - half_vfov, 1.25, altitude, 0.0],
+    	[ -4 + half_vfov, 1.25, altitude, 0.0],]
+
+	wp_3lanes = [
+    	[ -4 + half_vfov, -1.7333, altitude, 0.0],
+    	[ 4 - half_vfov, -1.7333, altitude, 0.0],
+    	[ 4 - half_vfov, 0, altitude, 0.0],
+    	[ -4 + half_vfov, 0, altitude, 0.0],
+    	[ -4 + half_vfov, 1.7333, altitude, 0.0],
+    	[ 4 - half_vfov, 1.7333, altitude, 0.0],]
+
+	#choose waypoints
+	if altitude < 2.7: #boundary FOV condition
+		wps = wp_3lanes
+	else: 
+		wps = wp_2lanes
 	# Create our guidance class option
 	guide = Guidance(wps)
 
