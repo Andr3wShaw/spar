@@ -39,11 +39,11 @@ class Guidance():
 		# Make some space to record down our current location
 		self.current_location = Point()
 		# Set our linear and rotational velocities for the flight
-		self.vel_linear = rospy.get_param("~vel_linear", 0.2)
+		self.vel_linear = rospy.get_param("~vel_linear", 0.5)
 		self.vel_yaw = rospy.get_param("~vel_yaw", 0.2)
 		# Set our position and yaw waypoint accuracies
-		self.accuracy_pos = rospy.get_param("~acc_pos", 0.1)
-		self.accuracy_yaw = rospy.get_param("~acc_yaw", 0.1)
+		self.accuracy_pos = rospy.get_param("~acc_pos", 0.3)
+		self.accuracy_yaw = rospy.get_param("~acc_yaw", 0.3)
 
 		# Create our action client
 		action_ns = rospy.get_param("~action_topic", 'spar/flight')
@@ -253,7 +253,7 @@ def main(args):
 	# Initialise ROS
 	rospy.init_node('guidance')
 
-	altitude = 2
+	altitude = 3.2
 
 	half_vfov = altitude*0.509525 #Half of 2atan(vfovTheta)
 
