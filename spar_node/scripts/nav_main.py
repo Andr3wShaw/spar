@@ -167,19 +167,20 @@ class Guidance():
 
 	def detected_object(self, msg_in):
 		self.performing_roi = True
-		rospy.loginfo(msg_in.data)
+		rospy.loginfo(msg_in)
 		self.spar_client.cancel_goal()
 
 		current_location = self.current_location
-		current_location = [current_location.x, current_location.y, current_location.z, 0]
+		current_location = [self.current_location.x, self.current_location.y, self.current_location.z, 0]
+
 
 		deployment_position = self.current_location
 		deployment_position.z = 0.5
-		#rospy.loginfo(current_location.x)
-		#rospy.loginfo(current_location.y)
+		rospy.loginfo(self.current_location.x)
+		rospy.loginfo(self.current_location.y)
 		actual_position = [deployment_position.x, deployment_position.y, deployment_position.z, 0]
 
-		if msg_in.data == "Person":
+		if msg_in == "Person":
 			#rospy.loginfo(msg_in.data)
 			self.send_wp(actual_position)
 			rospy.sleep(rospy.Duration(5))
@@ -187,7 +188,7 @@ class Guidance():
 			rospy.sleep(rospy.Duration(2))
 			
 
-		elif msg_in.data == "Backpack":
+		elif msg_in == "Backpack":
 			#rospy.loginfo(msg_in.data)
 			self.send_wp(actual_position)
 			rospy.sleep(rospy.Duration(5))
@@ -196,8 +197,13 @@ class Guidance():
 		
 		
 		self.send_wp(current_location)
+		self.spar_client.wait_for_result()
+		if self.spar_client.get_state() != GoalStatus.SUCCEEDED:
+			# Something went wrong, cancel out of guidance!
+			rospy.signal_shutdown("cancelled")
+			return
 
-		self.send_wp(self.waypoints[self.waypoint_counter - 1])
+		self.send_wp(self.waypoints[self.waypoint_counter])
 		self.performing_roi = False
 
 
@@ -275,10 +281,16 @@ class Guidance():
 		# This checking is either with the "self.timer" for waypoints
 		# or with direct calls during the ROI diversion
 		self.spar_client.send_goal(goal)
-		# self.count += 1
-		# rospy.loginfo(self.count)
-		# if self.count == 2:
-		# 	self.detected_object("Backpack")
+		self.count += 1
+		rospy.loginfo(self.count)
+		if self.count == 3:
+			rospy.sleep(rospy.Duration(2))
+			self.detected_object("Backpack")
+		
+		if self.count == 9:
+			rospy.sleep(rospy.Duration(2))
+			self.detected_object("Person")
+
 
 		 # If shutdown is issued, cancel current mission before rospy is shutdown
 		rospy.on_shutdown(lambda : self.spar_client.cancel_goal())
