@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-
 from argparse import ArgumentError
+import argparse
 import sys
 import runpy
 from math import *
@@ -33,12 +33,11 @@ class Guidance():
 		#self.topic_battery = "/mavros/battery"
 		self.topic_battery = "/uavasr/battery"
 		#self.topic_battery = "battery"
-
-
+		self.count = 0
 		# Make sure we have a valid waypoint list
 		if not self.check_waypoints(waypoints):
 			raise ArgumentError("Invalid waypoint list input!")
-
+		
 		# Internal counter to see what waypoint were are up to
 		self.waypoint_counter = 0
 
@@ -54,7 +53,7 @@ class Guidance():
 		# Make some space to record down our current location
 		self.current_location = Point()
 		# Set our linear and rotational velocities for the flight
-		self.vel_linear = rospy.get_param("~vel_linear", 0.5)
+		self.vel_linear = rospy.get_param("~vel_linear", 1)
 		self.vel_yaw = rospy.get_param("~vel_yaw", 0.2)
 		# Set our position and yaw waypoint accuracies
 		self.accuracy_pos = rospy.get_param("~acc_pos", 0.3)
@@ -66,8 +65,11 @@ class Guidance():
 		rospy.loginfo("Waiting for spar...")
 		self.spar_client.wait_for_server()
 
+
 		if not rospy.is_shutdown():
 			# Good to go, start mission
+			self.send_flight_motion()	#takeoff
+
 			rospy.loginfo("Starting waypoint mission")
 
 			# Setup first waypoint segment
@@ -90,6 +92,10 @@ class Guidance():
 			self.sub_object = rospy.Subscriber("object_detection", String, self.detected_object)
 
 			self.pub_deploy = rospy.Publisher('deploy_payload', Int32, queue_size=10)
+
+			self.sub_aruco = rospy.Subscriber('/aruco_marker/id', Int32, queue_size=10)
+
+			self.sub_position = rospy.Subscriber('uavasr/local_position/pose', PoseStamped, self.callback_pose)
 
 
 			# XXX: Could have a publisher to output our waypoint progress
@@ -156,26 +162,41 @@ class Guidance():
 		self.current_location = msg_in.pose.position
 
 
+	# def detect_self, msg_in):
+	# 	aruco(
 
 	def detected_object(self, msg_in):
 		self.performing_roi = True
-		
-		#start_location = self.current_location
-		rwp = [-1, -1, 1.5, 0.0]
-		self.send_wp(rwp)
-		
-		if msg_in.data == "Person":
-			rospy.loginfo(msg_in.data)
+		rospy.loginfo(msg_in)
+		self.spar_client.cancel_goal()
+
+		current_location = self.current_location
+		deployment_position = self.current_location
+		deployment_position.z = 0.5
+		yaw = 0
+		rospy.loginfo(deployment_position.x)
+		rospy.loginfo(deployment_position.y)
+		actual_position = [deployment_position.x, deployment_position.y, deployment_position.z, 0]
+
+		if msg_in == "Person":
+			#rospy.loginfo(msg_in.data)
+			self.send_wp(actual_position)
+			rospy.sleep(rospy.Duration(5))
 			self.pub_deploy.publish(0)
 			rospy.sleep(rospy.Duration(2))
+			
 
-		elif msg_in.data == "Backpack":
-			rospy.loginfo(msg_in.data)
-			self.pub_deploy.publish(1)
+		elif msg_in == "Backpack":
+			#rospy.loginfo(msg_in.data)
+			self.send_wp(actual_position)
+			rospy.sleep(rospy.Duration(5))
+			self.pub_deploy.publish(0)
 			rospy.sleep(rospy.Duration(2))
 		
 		
-		#self.send_wp(start_location)
+		#self.send_wp(current_location)
+
+		self.send_wp(self.waypoints[self.waypoint_counter - 1])
 		self.performing_roi = False
 
 
@@ -234,7 +255,6 @@ class Guidance():
 		# Make sure the waypoint is valid before continuing
 		# if not self.check_waypoint(wp):
 		# 	raise ArgumentError("Invalid waypoint input!")
-
 		# Build the flight goal
 		goal = FlightMotionGoal()
 		goal.motion = FlightMotionGoal.MOTION_GOTO
@@ -254,6 +274,11 @@ class Guidance():
 		# This checking is either with the "self.timer" for waypoints
 		# or with direct calls during the ROI diversion
 		self.spar_client.send_goal(goal)
+		self.count += 1
+		rospy.loginfo(self.count)
+		if self.count == 2:
+			self.detected_object("Backpack")
+
 		 # If shutdown is issued, cancel current mission before rospy is shutdown
 		rospy.on_shutdown(lambda : self.spar_client.cancel_goal())
 
@@ -299,154 +324,148 @@ class Guidance():
 				rospy.signal_shutdown("cancelled")
 
 
-def send_flight_motion(spar_client):
-	# Create our goal
-	goal = FlightMotionGoal()
-	goal.motion = FlightMotionGoal.MOTION_TAKEOFF
-	goal.position.z = rospy.get_param("~height", 1.0)			# Other position information is ignored
-	goal.velocity_vertical = rospy.get_param("~speed", 1.0)		# Other velocity information is ignored
-	goal.wait_for_convergence = True							# Wait for our takeoff "waypoint" to be reached
-	goal.position_radius = rospy.get_param("~position_radius", 0.1)
-	goal.yaw_range = rospy.get_param("~yaw_range", 0.1)
+	def send_flight_motion(self):
+		# Create our goal
+		goal = FlightMotionGoal()
+		goal.motion = FlightMotionGoal.MOTION_TAKEOFF
+		goal.position.z = rospy.get_param("~height", 1.0)			# Other position information is ignored
+		goal.velocity_vertical = rospy.get_param("~speed", 1.0)		# Other velocity information is ignored
+		goal.wait_for_convergence = True							# Wait for our takeoff "waypoint" to be reached
+		goal.position_radius = rospy.get_param("~position_radius", 0.1)
+		goal.yaw_range = rospy.get_param("~yaw_range", 0.1)
 
-	# Send the goal
-	rospy.loginfo("Sending goal motion...")
-	spar_client.send_goal(goal)
-	# If shutdown is issued, cancel current mission before rospy is shutdown
-	rospy.on_shutdown(lambda : spar_client.cancel_goal())
-	# Wait for the result of the goal
-	spar_client.wait_for_result()
+		# Send the goal
+		rospy.loginfo("Sending goal motion...")
+		self.spar_client.send_goal(goal)
+		# If shutdown is issued, cancel current mission before rospy is shutdown
+		rospy.on_shutdown(lambda : self.spar_client.cancel_goal())
+		# Wait for the result of the goal
+		self.spar_client.wait_for_result()
 
-	# Output some feedback for our flight
-	result = spar_client.get_state()
-	if result == GoalStatus.SUCCEEDED:
-		rospy.loginfo("Take-off complete!")
-	else:
-		rospy.logerr("Take-off failed!")
+		# Output some feedback for our flight
+		result = self.spar_client.get_state()
+		if result == GoalStatus.SUCCEEDED:
+			rospy.loginfo("Take-off complete!")
+		else:
+			rospy.logerr("Take-off failed!")
 
-		# Detailed Feedback
-		if result != GoalStatus.SUCCEEDED:
-			if(result == GoalStatus.PENDING) or (result == GoalStatus.ACTIVE):
-				rospy.loginfo("Sent command to cancel current mission")
-			elif(result == GoalStatus.PREEMPTED):
-				rospy.logwarn("The current mission was cancelled")
-			elif(result == GoalStatus.ABORTED):
-				rospy.logwarn("The current mission was aborted")
-			elif(result == GoalStatus.RECALLED):
-				rospy.logerr("Error: The current mission was recalled")
-			elif(result == GoalStatus.REJECTED):
-				rospy.logerr("Error: The current mission was rejected")
-			else:
-				rospy.logerr("Error: An unknown goal status was recieved")
+			# Detailed Feedback
+			if result != GoalStatus.SUCCEEDED:
+				if(result == GoalStatus.PENDING) or (result == GoalStatus.ACTIVE):
+					rospy.loginfo("Sent command to cancel current mission")
+				elif(result == GoalStatus.PREEMPTED):
+					rospy.logwarn("The current mission was cancelled")
+				elif(result == GoalStatus.ABORTED):
+					rospy.logwarn("The current mission was aborted")
+				elif(result == GoalStatus.RECALLED):
+					rospy.logerr("Error: The current mission was recalled")
+				elif(result == GoalStatus.REJECTED):
+					rospy.logerr("Error: The current mission was rejected")
+				else:
+					rospy.logerr("Error: An unknown goal status was recieved")
 
-def send_landing_motion(spar_client):
-	# Create our goal
-	goal = FlightMotionGoal()
-	goal.motion = FlightMotionGoal.MOTION_LAND
-	goal.velocity_vertical = rospy.get_param("~speed", 0.2)		# Other velocity information is ignored
-	# No other information is used
+	def send_landing_motion(spar_client):
+		# Create our goal
+		goal = FlightMotionGoal()
+		goal.motion = FlightMotionGoal.MOTION_LAND
+		goal.velocity_vertical = rospy.get_param("~speed", 0.2)		# Other velocity information is ignored
+		# No other information is used
 
-	# Send the goal
-	rospy.loginfo("Sending goal motion...")
-	spar_client.send_goal(goal)
-	 # If shutdown is issued, cancel current mission before rospy is shutdown
-	rospy.on_shutdown(lambda : spar_client.cancel_goal())
-	# Wait for the result of the goal
-	spar_client.wait_for_result()
+		# Send the goal
+		rospy.loginfo("Sending goal motion...")
+		spar_client.send_goal(goal)
+		# If shutdown is issued, cancel current mission before rospy is shutdown
+		rospy.on_shutdown(lambda : spar_client.cancel_goal())
+		# Wait for the result of the goal
+		spar_client.wait_for_result()
 
-	# Output some feedback for our flight
-	result = spar_client.get_state()
-	if result == GoalStatus.SUCCEEDED:
-		rospy.loginfo("Landing complete!")
-	else:
-		rospy.logerr("Landing failed!")
+		# Output some feedback for our flight
+		result = spar_client.get_state()
+		if result == GoalStatus.SUCCEEDED:
+			rospy.loginfo("Landing complete!")
+		else:
+			rospy.logerr("Landing failed!")
 
-		# Detailed Feedback
-		if result != GoalStatus.SUCCEEDED:
-			if(result == GoalStatus.PENDING) or (result == GoalStatus.ACTIVE):
-				rospy.loginfo("Sent command to cancel current mission")
-			elif(result == GoalStatus.PREEMPTED):
-				rospy.logwarn("The current mission was cancelled")
-			elif(result == GoalStatus.ABORTED):
-				rospy.logwarn("The current mission was aborted")
-			elif(result == GoalStatus.RECALLED):
-				rospy.logerr("Error: The current mission was recalled")
-			elif(result == GoalStatus.REJECTED):
-				rospy.logerr("Error: The current mission was rejected")
-			else:
-				rospy.logerr("Error: An unknown goal status was recieved")
+			# Detailed Feedback
+			if result != GoalStatus.SUCCEEDED:
+				if(result == GoalStatus.PENDING) or (result == GoalStatus.ACTIVE):
+					rospy.loginfo("Sent command to cancel current mission")
+				elif(result == GoalStatus.PREEMPTED):
+					rospy.logwarn("The current mission was cancelled")
+				elif(result == GoalStatus.ABORTED):
+					rospy.logwarn("The current mission was aborted")
+				elif(result == GoalStatus.RECALLED):
+					rospy.logerr("Error: The current mission was recalled")
+				elif(result == GoalStatus.REJECTED):
+					rospy.logerr("Error: The current mission was rejected")
+				else:
+					rospy.logerr("Error: An unknown goal status was recieved")
 
 
 def main(args):
-	# Initialise ROS
-	rospy.init_node('guidance')
+    # Initialise ROS
+    parser = argparse.ArgumentParser(description='Run drone guidance script')
+    parser.add_argument('--altitude', type=float, default=3.5, help='Altitude for drone takeoff (default: 3.5)')
+    args = parser.parse_args()
 
-	# action_ns = rospy.get_param("~action_topic", 'spar/flight')
+    rospy.init_node('guidance')
 
-	# # Create our action client
-	# spar_client = actionlib.SimpleActionClient(action_ns, FlightMotionAction)
-	# rospy.loginfo("Waiting for spar...")
-	# spar_client.wait_for_server()
+    if args.altitude > 4:
+        rospy.logerr("Altitude Error: Too Large!")
+        return
+    elif args.altitude < 1.5: 
+        rospy.logerr("Altitude Error: Too Small!")
+        return
 
-	# # Send the flight command
-	# # This will lock the thread until it is "done"
-	# # Make sure "ros is ok" in case we hit CTRL-C while waiting above
-	# if not rospy.is_shutdown():
-	# 	send_flight_motion(spar_client)
-	# 	rospy.sleep(rospy.Duration(10))
+    half_fov = args.altitude * tan(19.09)  # Calculate half field of view angle
 
-	altitude = 3.5
+    wp_3lanes = [
+        [-4 + half_fov, -1.7333, args.altitude, 0.0],
+        [4 - half_fov, -1.7333, args.altitude, 0.0],
+        [4 - half_fov, 0, args.altitude, 0.0],
+        [-4 + half_fov, 0, args.altitude, 0.0],
+        [-4 + half_fov, 1.7333, args.altitude, 0.0],
+        [4 - half_fov, 1.7333, args.altitude, 0.0]]
 
-	half_fov = altitude*0.346 #(altitude x tan(19.09))
+    wp_4lanes = [
+        [-4 + half_fov, -1.95, args.altitude, 0.0],
+        [4 - half_fov, -1.95, args.altitude, 0.0],
+        [4 - half_fov, -0.65, args.altitude, 0.0],
+        [-4 + half_fov, -0.65, args.altitude, 0.0],
+        [-4 + half_fov, 0.65, args.altitude, 0.0],
+        [4 - half_fov, 0.65, args.altitude, 0.0],
+        [4 - half_fov, 1.95, args.altitude, 0.0],
+        [-4 + half_fov, 1.95, args.altitude, 0.0]]
 
-	wp_3lanes = [
-		[ -4 + half_fov, -1.7333, altitude, 0.0],
-		[ 4 - half_fov, -1.7333, altitude, 0.0],
-		[ 4 - half_fov, 0, altitude, 0.0],
-		[ -4 + half_fov, 0, altitude, 0.0],
-		[ -4 + half_fov, 1.7333, altitude, 0.0],
-		[ 4 - half_fov, 1.7333, altitude, 0.0]]
+    wp_5lanes = [
+        [-4 + half_fov, -2.08, args.altitude, 0.0],
+        [4 - half_fov, -2.08, args.altitude, 0.0],
+        [4 - half_fov, -1.04, args.altitude, 0.0],
+        [-4 + half_fov, -1.04, args.altitude, 0.0],
+        [-4 + half_fov, 0, args.altitude, 0.0],
+        [4 - half_fov, 0, args.altitude, 0.0],
+        [4 - half_fov, 1.04, args.altitude, 0.0],
+        [-4 + half_fov, 1.04, args.altitude, 0.0],
+        [-4 + half_fov, 2.08, args.altitude, 0.0],
+        [4 - half_fov, 2.08, args.altitude, 0.0]]
 
-	wp_4lanes = [
-		[ -4 + half_fov, -1.95, altitude, 0.0],
-		[ 4 - half_fov, -1.95, altitude, 0.0],
-		[ 4 - half_fov, -0.65, altitude, 0.0],
-		[ -4 + half_fov, -0.65, altitude, 0.0],
-		[ -4 + half_fov, 0.65, altitude, 0.0],
-		[ 4 - half_fov, 0.65, altitude, 0.0],
-		[ 4 - half_fov, 1.95, altitude, 0.0],
-		[ -4 + half_fov, 1.95, altitude, 0.0]]
-	
-	wp_5lanes = [
-		[ -4 + half_fov, -2.08, altitude, 0.0],
-		[ 4 - half_fov, -2.08, altitude, 0.0],
-		[ 4 - half_fov, -1.04, altitude, 0.0],
-		[ -4 + half_fov, -1.04, altitude, 0.0],
-		[ -4 + half_fov, 0, altitude, 0.0],
-		[ 4 - half_fov, 0, altitude, 0.0],
-		[ 4 - half_fov, 1.04, altitude, 0.0],
-		[ -4 + half_fov, 1.04, altitude, 0.0],
-		[ -4 + half_fov, 2.08, altitude, 0.0],
-		[ 4 - half_fov, 2.08, altitude, 0.0]]
+    #choose waypoints
+    if args.altitude < 1.88: #boundary FOV condition
+        wps = wp_5lanes
+    elif args.altitude < 2.5: 
+        wps = wp_4lanes
+    else:
+        wps = wp_3lanes
+    # Create our guidance class option
+    guide = Guidance(wps)
 
-	#choose waypoints
-	if altitude < 1.88: #boundary FOV condition
-		wps = wp_5lanes
-	elif altitude < 2.5: 
-		wps = wp_4lanes
-	else:
-		wps = wp_3lanes
-	# Create our guidance class option
-	guide = Guidance(wps)
-
-	# Spin!
-	rospy.spin()
-
+    # Spin!
+    rospy.spin()
 
 if __name__ == '__main__':
-	try:
-		main(sys.argv)
-	except rospy.ROSInterruptException:
-		pass
+    try:
+        main(sys.argv)
+    except rospy.ROSInterruptException:
+        pass
 
-	print('')
+print('')
