@@ -95,7 +95,7 @@ class Guidance():
 
 			self.sub_aruco = rospy.Subscriber('/aruco_marker/id', Int32, queue_size=10)
 
-			self.sub_position = rospy.Subscriber('uavasr/local_position/pose', PoseStamped, self.callback_pose)
+			self.sub_position = rospy.Subscriber('uavasr/pose', PoseStamped, self.callback_pose)
 
 
 			# XXX: Could have a publisher to output our waypoint progress
@@ -167,26 +167,27 @@ class Guidance():
 
 	def detected_object(self, msg_in):
 		self.performing_roi = True
-		rospy.loginfo(msg_in)
+		rospy.loginfo(msg_in.data)
 		self.spar_client.cancel_goal()
 
 		current_location = self.current_location
+		current_location = [current_location.x, current_location.y, current_location.z, 0]
+
 		deployment_position = self.current_location
 		deployment_position.z = 0.5
-		yaw = 0
-		rospy.loginfo(deployment_position.x)
-		rospy.loginfo(deployment_position.y)
+		#rospy.loginfo(current_location.x)
+		#rospy.loginfo(current_location.y)
 		actual_position = [deployment_position.x, deployment_position.y, deployment_position.z, 0]
 
-		if msg_in == "Person":
+		if msg_in.data == "Person":
 			#rospy.loginfo(msg_in.data)
 			self.send_wp(actual_position)
 			rospy.sleep(rospy.Duration(5))
-			self.pub_deploy.publish(0)
+			self.pub_deploy.publish(1)
 			rospy.sleep(rospy.Duration(2))
 			
 
-		elif msg_in == "Backpack":
+		elif msg_in.data == "Backpack":
 			#rospy.loginfo(msg_in.data)
 			self.send_wp(actual_position)
 			rospy.sleep(rospy.Duration(5))
@@ -194,7 +195,7 @@ class Guidance():
 			rospy.sleep(rospy.Duration(2))
 		
 		
-		#self.send_wp(current_location)
+		self.send_wp(current_location)
 
 		self.send_wp(self.waypoints[self.waypoint_counter - 1])
 		self.performing_roi = False
@@ -274,10 +275,10 @@ class Guidance():
 		# This checking is either with the "self.timer" for waypoints
 		# or with direct calls during the ROI diversion
 		self.spar_client.send_goal(goal)
-		self.count += 1
-		rospy.loginfo(self.count)
-		if self.count == 2:
-			self.detected_object("Backpack")
+		# self.count += 1
+		# rospy.loginfo(self.count)
+		# if self.count == 2:
+		# 	self.detected_object("Backpack")
 
 		 # If shutdown is issued, cancel current mission before rospy is shutdown
 		rospy.on_shutdown(lambda : self.spar_client.cancel_goal())
