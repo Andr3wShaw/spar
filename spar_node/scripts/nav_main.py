@@ -31,7 +31,7 @@ class Guidance():
 
 		# Set battery topic value (for simulator or actual mode)
 		#self.topic_battery = "/mavros/battery"
-		self.topic_battery = "/uavasr/battery"
+		self.topic_battery = "/mavros/battery"
 		#self.topic_battery = "battery"
 		self.count = 0
 		# Make sure we have a valid waypoint list
@@ -50,10 +50,16 @@ class Guidance():
 		# Save the input waypoints
 		self.waypoints = waypoints
 
+		self.person_detected = False
+		self.backpack_detected = False
+		self.aruco_detected = False
+
 		# Make some space to record down our current location
 		self.current_location = Point()
+		self.landing_location = self.current_location
+
 		# Set our linear and rotational velocities for the flight
-		self.vel_linear = rospy.get_param("~vel_linear", 1)
+		self.vel_linear = rospy.get_param("~vel_linear", 0.5)
 		self.vel_yaw = rospy.get_param("~vel_yaw", 0.2)
 		# Set our position and yaw waypoint accuracies
 		self.accuracy_pos = rospy.get_param("~acc_pos", 0.3)
@@ -93,9 +99,10 @@ class Guidance():
 
 			self.pub_deploy = rospy.Publisher('deploy_payload', Int32, queue_size=10)
 
-			self.sub_aruco = rospy.Subscriber('/aruco_marker/id', Int32, queue_size=10)
+			self.sub_aruco = rospy.Subscriber('/aruco_marker/id', Int32, self.aruco_detection)
 
-			self.sub_position = rospy.Subscriber('uavasr/pose', PoseStamped, self.callback_pose)
+			self.sub_position = rospy.Subscriber('mavros/local_position/pose', PoseStamped, self.callback_pose) 
+			#self.sub_position = rospy.Subscriber('uavasr/pose', PoseStamped, self.callback_pose)
 
 
 			# XXX: Could have a publisher to output our waypoint progress
@@ -149,6 +156,7 @@ class Guidance():
 	# This function will make sure we shut down the node as safely as possible
 	def shutdown(self):
 		# Unregister anything that needs it here
+	
 		self.sub_pose.unregister()
 		self.sub_roi.unregister()
 		self.spar_client.cancel_goal()
@@ -160,52 +168,65 @@ class Guidance():
 	def callback_pose(self, msg_in):
 		# Store the current position at all times so it can be accessed later
 		self.current_location = msg_in.pose.position
+		# self.current_location = self.landing_location
+		# self.landing_location = [self.landing_location.x, self.landing_location.y, self.landing_location.z, 0]
 
-
-	# def detect_self, msg_in):
-	# 	aruco(
-
-	def detected_object(self, msg_in):
-		self.performing_roi = True
-		rospy.loginfo(msg_in)
-		self.spar_client.cancel_goal()
-
-		current_location = self.current_location
-		current_location = [self.current_location.x, self.current_location.y, self.current_location.z, 0]
-
-
-		deployment_position = self.current_location
-		deployment_position.z = 0.5
-		rospy.loginfo(self.current_location.x)
-		rospy.loginfo(self.current_location.y)
-		actual_position = [deployment_position.x, deployment_position.y, deployment_position.z, 0]
-
-		if msg_in == "Person":
-			#rospy.loginfo(msg_in.data)
-			self.send_wp(actual_position)
-			rospy.sleep(rospy.Duration(5))
-			self.pub_deploy.publish(1)
-			rospy.sleep(rospy.Duration(2))
+		
+	def aruco_detection(self, msg_in):
+		if self.aruco_detected == False:
+			self.landing_location = self.current_location
+			self.landing_location = [self.landing_location.x, self.landing_location.y, self.landing_location.z, 0]
+			rospy.loginfo("ArUco Detected: %d", msg_in.data)
+			#rospy.loginfo("Marker Location: %f, %f",self.landing_location.x,self.landing_location.y)
+			self.aruco_detected = True
+		else:
+			return
+		
 			
 
-		elif msg_in == "Backpack":
-			#rospy.loginfo(msg_in.data)
-			self.send_wp(actual_position)
-			rospy.sleep(rospy.Duration(5))
-			self.pub_deploy.publish(0)
-			rospy.sleep(rospy.Duration(2))
-		
-		
-		self.send_wp(current_location)
-		self.spar_client.wait_for_result()
-		if self.spar_client.get_state() != GoalStatus.SUCCEEDED:
-			# Something went wrong, cancel out of guidance!
-			rospy.signal_shutdown("cancelled")
+	def detected_object(self, msg_in):
+		if self.waypoint_counter >= 2:
+			
+			self.performing_roi = True
+			self.spar_client.cancel_goal()
+
+			current_location = self.current_location
+			current_location = [self.current_location.x, self.current_location.y, self.current_location.z, 0]
+
+
+			deployment_position = self.current_location
+			deployment_position.z = 1
+			actual_position = [deployment_position.x, deployment_position.y, deployment_position.z, 0]
+
+			if msg_in.data == "Person" and self.person_detected == False:
+				#rospy.loginfo(msg_in.data)
+				self.person_detected = True
+				self.send_wp(actual_position)
+				rospy.sleep(rospy.Duration(5))
+				self.pub_deploy.publish(0)
+				rospy.sleep(rospy.Duration(2))
+				
+
+			elif msg_in.data == "Backpack" and self.backpack_detected == False:
+				#rospy.loginfo(msg_in.data)
+				self.backpack_detected = True
+				self.send_wp(actual_position)
+				rospy.sleep(rospy.Duration(5))
+				self.pub_deploy.publish(1)
+				rospy.sleep(rospy.Duration(2))
+			
+			
+			self.send_wp(current_location)
+			self.spar_client.wait_for_result()
+			if self.spar_client.get_state() != GoalStatus.SUCCEEDED:
+				# Something went wrong, cancel out of guidance!
+				rospy.signal_shutdown("cancelled")
+				return
+
+			self.send_wp(self.waypoints[self.waypoint_counter-1])
+			self.performing_roi = False
+		else:
 			return
-
-		self.send_wp(self.waypoints[self.waypoint_counter])
-		self.performing_roi = False
-
 
 	# This function will fire whenever a ROI pose message is sent
 	# It is also responsible for handling the ROI "inspection task"
@@ -248,6 +269,7 @@ class Guidance():
 			rospy.signal_shutdown("cancelled")
 			return
 
+
 		# "waypoint_counter" represents the "next waypoint"
 		# "waypoint_counter - 1" represents the "current waypoint"
 		rospy.loginfo("Resuming flight plan from waypoint %i!" % (self.waypoint_counter - 1))
@@ -281,15 +303,17 @@ class Guidance():
 		# This checking is either with the "self.timer" for waypoints
 		# or with direct calls during the ROI diversion
 		self.spar_client.send_goal(goal)
-		self.count += 1
-		rospy.loginfo(self.count)
-		if self.count == 3:
-			rospy.sleep(rospy.Duration(2))
-			self.detected_object("Backpack")
+		# self.count += 1
+		# rospy.loginfo(self.count)
+		# if self.count == 3:
+		# 	rospy.sleep(rospy.Duration(2))
+		# 	self.detected_object("Backpack")
 		
-		if self.count == 9:
-			rospy.sleep(rospy.Duration(2))
-			self.detected_object("Person")
+		# if self.count == 9:
+		# 	rospy.sleep(rospy.Duration(2))
+		# 	self.detected_object("Person")
+
+
 
 
 		 # If shutdown is issued, cancel current mission before rospy is shutdown
@@ -328,8 +352,17 @@ class Guidance():
 					self.waypoint_counter += 1
 				else:
 					# Else the mission is over, shutdown and quit the node
-					# XXX:	This could be used to restart the mission back to the
+					# :	This could be used to restart the mission back to the
 					#		first waypoint instead to restart the mission
+					self.send_wp(self.landing_location)
+					self.spar_client.wait_for_result()
+					if self.spar_client.get_state() != GoalStatus.SUCCEEDED:
+						# Something went wrong, cancel out of guidance!
+						rospy.signal_shutdown("cancelled")
+						return
+
+					self.send_landing_motion()
+			#rospy.loginfo("ArUco Marker" + msg_in.data)
 					rospy.loginfo("Mission complete!")
 					rospy.signal_shutdown("complete")
 			elif (self.spar_client.get_state() == GoalStatus.PREEMPTED) or (self.spar_client.get_state() == GoalStatus.ABORTED) or (self.spar_client.get_state() == GoalStatus.REJECTED):
@@ -344,7 +377,7 @@ class Guidance():
 		goal.position.z = rospy.get_param("~height", 1.0)			# Other position information is ignored
 		goal.velocity_vertical = rospy.get_param("~speed", 1.0)		# Other velocity information is ignored
 		goal.wait_for_convergence = True							# Wait for our takeoff "waypoint" to be reached
-		goal.position_radius = rospy.get_param("~position_radius", 0.1)
+		goal.position_radius = rospy.get_param("~position_radius", 0.3)
 		goal.yaw_range = rospy.get_param("~yaw_range", 0.1)
 
 		# Send the goal
@@ -377,7 +410,7 @@ class Guidance():
 				else:
 					rospy.logerr("Error: An unknown goal status was recieved")
 
-	def send_landing_motion(spar_client):
+	def send_landing_motion(self):
 		# Create our goal
 		goal = FlightMotionGoal()
 		goal.motion = FlightMotionGoal.MOTION_LAND
@@ -386,14 +419,14 @@ class Guidance():
 
 		# Send the goal
 		rospy.loginfo("Sending goal motion...")
-		spar_client.send_goal(goal)
+		self.spar_client.send_goal(goal)
 		# If shutdown is issued, cancel current mission before rospy is shutdown
-		rospy.on_shutdown(lambda : spar_client.cancel_goal())
+		rospy.on_shutdown(lambda : self.spar_client.cancel_goal())
 		# Wait for the result of the goal
-		spar_client.wait_for_result()
+		self.spar_client.wait_for_result()
 
 		# Output some feedback for our flight
-		result = spar_client.get_state()
+		result = self.spar_client.get_state()
 		if result == GoalStatus.SUCCEEDED:
 			rospy.loginfo("Landing complete!")
 		else:
