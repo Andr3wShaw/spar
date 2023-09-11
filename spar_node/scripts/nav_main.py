@@ -17,6 +17,8 @@ from std_msgs.msg import String, Int32
 
 from sensor_msgs.msg import BatteryState
 
+from nav_msgs.msg import Path
+
 
 
 
@@ -502,11 +504,34 @@ def main(args):
         wps = wp_4lanes
     else:
         wps = wp_3lanes
-    # Create our guidance class option
+    display_path(wps)
+
+	# Create our guidance class option
     guide = Guidance(wps)
 
     # Spin!
     rospy.spin()
+
+def display_path(wps):
+	pub_path = rospy.Publisher("/mission_plan/path", Path, queue_size=10, latch=True)
+	msg = Path()
+	msg.header.frame_id = "/map"
+	msg.header.stamp = rospy.Time.now()
+
+	for wp in wps:
+		pose = PoseStamped()
+		pose.pose.position.x = wp[0]
+		pose.pose.position.y = wp[1]
+		pose.pose.position.z = wp[2]
+
+		pose.pose.orientation.w = 1.0
+		pose.pose.orientation.x = 0.0
+		pose.pose.orientation.y = 0.0
+		pose.pose.orientation.z = 0.0
+
+		msg.poses.append(pose)
+	
+	pub_path.publish(msg)
 
 if __name__ == '__main__':
     try:
