@@ -48,6 +48,7 @@ class Guidance():
 		# This will stop our "waypoint is reached" callback from firing
 		# during the roi diversion and taking over our flight!
 		self.performing_roi = False
+		self.safe_landing = False
 
 		# Save the input waypoints
 		self.waypoints = waypoints
@@ -104,7 +105,7 @@ class Guidance():
 			self.sub_aruco = rospy.Subscriber('/aruco_marker/id', Int32, self.aruco_detection)
 
 			self.sub_position = rospy.Subscriber('mavros/local_position/pose', PoseStamped, self.callback_pose) 
-			#self.sub_position = rospy.Subscriber('uavasr/pose', PoseStamped, self.callback_pose)
+			self.sub_position = rospy.Subscriber('uavasr/pose', PoseStamped, self.callback_pose)
 
 
 			# XXX: Could have a publisher to output our waypoint progress
@@ -203,6 +204,7 @@ class Guidance():
 			if msg_in.data == "Person" and self.person_detected == False:
 				#rospy.loginfo(msg_in.data)
 				self.person_detected = True
+				rospy.Publisher("object_detection", String, queue_size=10)
 				self.send_wp(actual_position)
 				rospy.sleep(rospy.Duration(5))
 				self.pub_deploy.publish(0)
@@ -212,6 +214,7 @@ class Guidance():
 			elif msg_in.data == "Backpack" and self.backpack_detected == False:
 				#rospy.loginfo(msg_in.data)
 				self.backpack_detected = True
+				rospy.Publisher("object_detection", String, queue_size=10)
 				self.send_wp(actual_position)
 				rospy.sleep(rospy.Duration(5))
 				self.pub_deploy.publish(1)
@@ -307,10 +310,9 @@ class Guidance():
 		self.spar_client.send_goal(goal)
 		# self.count += 1
 		# rospy.loginfo(self.count)
-		# if self.count == 3:
-		# 	rospy.sleep(rospy.Duration(2))
-		# 	self.detected_object("Backpack")
-		
+		if self.waypoint_counter == 3:
+			rospy.sleep(rospy.Duration(2))
+			self.detected_object("Backpack")
 		# if self.count == 9:
 		# 	rospy.sleep(rospy.Duration(2))
 		# 	self.detected_object("Person")
@@ -326,6 +328,13 @@ class Guidance():
 		self.battery_percent = battery_info.percentage # battery percentage is a float from 0 - 1
 		self.battery_charge = battery_info.charge # charge is measured in Amp Hours
 
+	def execute_safe_landing(self, timer=None):
+		# check battery level somewhere else and if battery low call this funtion (Maybe in send_wp)
+		self.printAndSave("Battery level critical! Sarting safe landing")
+
+		# set flag indicating safe landing mode
+		self.safe_landing = True
+		
 
 	# This function will fire whenever we recieve a timer event (te) from rospy.Timer()
 	# The main purpose is to check if a waypoint has been reached,
@@ -468,39 +477,78 @@ def main(args):
     half_fov = args.altitude * tan(19.09)  # Calculate half field of view angle
 
     wp_3lanes = [
-        [-4 + half_fov, -1.7333, args.altitude, 0.0],
-        [4 - half_fov, -1.7333, args.altitude, 0.0],
+        [-4 + half_fov, -2.07, args.altitude, 0.0],
+        [4 - half_fov, -2.07, args.altitude, 0.0],
         [4 - half_fov, 0, args.altitude, 0.0],
         [-4 + half_fov, 0, args.altitude, 0.0],
-        [-4 + half_fov, 1.7333, args.altitude, 0.0],
-        [4 - half_fov, 1.7333, args.altitude, 0.0]]
+        [-4 + half_fov, 2.07, args.altitude, 0.0],
+        [4 - half_fov, 2.07, args.altitude, 0.0]
+		]
 
     wp_4lanes = [
-        [-4 + half_fov, -1.95, args.altitude, 0.0],
-        [4 - half_fov, -1.95, args.altitude, 0.0],
-        [4 - half_fov, -0.65, args.altitude, 0.0],
-        [-4 + half_fov, -0.65, args.altitude, 0.0],
-        [-4 + half_fov, 0.65, args.altitude, 0.0],
-        [4 - half_fov, 0.65, args.altitude, 0.0],
-        [4 - half_fov, 1.95, args.altitude, 0.0],
-        [-4 + half_fov, 1.95, args.altitude, 0.0]]
+        [-4 + half_fov, -2.325, args.altitude, 0.0],
+        [4 - half_fov, -2.325, args.altitude, 0.0],
+        [4 - half_fov, -0.775, args.altitude, 0.0],
+        [-4 + half_fov, -0.775, args.altitude, 0.0],
+        [-4 + half_fov, 0.775, args.altitude, 0.0],
+        [4 - half_fov, 0.775, args.altitude, 0.0],
+        [4 - half_fov, 2.325, args.altitude, 0.0],
+        [-4 + half_fov, 2.325, args.altitude, 0.0]
+		]
 
     wp_5lanes = [
-        [-4 + half_fov, -2.08, args.altitude, 0.0],
-        [4 - half_fov, -2.08, args.altitude, 0.0],
-        [4 - half_fov, -1.04, args.altitude, 0.0],
-        [-4 + half_fov, -1.04, args.altitude, 0.0],
+        [-4 + half_fov, -2.48, args.altitude, 0.0],
+        [4 - half_fov, -2.48, args.altitude, 0.0],
+        [4 - half_fov, -1.24, args.altitude, 0.0],
+        [-4 + half_fov, -1.24, args.altitude, 0.0],
         [-4 + half_fov, 0, args.altitude, 0.0],
         [4 - half_fov, 0, args.altitude, 0.0],
-        [4 - half_fov, 1.04, args.altitude, 0.0],
-        [-4 + half_fov, 1.04, args.altitude, 0.0],
-        [-4 + half_fov, 2.08, args.altitude, 0.0],
-        [4 - half_fov, 2.08, args.altitude, 0.0]]
+        [4 - half_fov, 1.24, args.altitude, 0.0],
+        [-4 + half_fov, 1.24, args.altitude, 0.0],
+        [-4 + half_fov, 2.48, args.altitude, 0.0],
+        [4 - half_fov, 2.48, args.altitude, 0.0]
+		]
+	
+    wp_6lanes = [
+    	[-4 + half_fov, -2.58, args.altitude, 0.0],
+    	[4 - half_fov, -2.58, args.altitude, 0.0],
+        [4 - half_fov, -1.55, args.altitude, 0.0],
+        [-4 + half_fov, -1.55, args.altitude, 0.0],
+        [-4 + half_fov, -0.51, args.altitude, 0.0],
+        [4 - half_fov, -0.51, args.altitude, 0.0],
+        [4 - half_fov, 0.51, args.altitude, 0.0],
+        [-4 + half_fov, 0.51, args.altitude, 0.0],
+        [-4 + half_fov, 1.55, args.altitude, 0.0],
+        [4 - half_fov, 1.55, args.altitude, 0.0],
+		[-4 + half_fov, 2.58, args.altitude, 0.0],
+        [4 - half_fov, 2.58, args.altitude, 0.0]
+	]
+
+    wp_7lanes = [
+		[-4 + half_fov, -2.5, args.altitude, 0.0],
+        [4 - half_fov, -2.5, args.altitude, 0.0],
+        [4 - half_fov, -1.66, args.altitude, 0.0],
+        [-4 + half_fov, -1.66, args.altitude, 0.0],
+        [-4 + half_fov, -0.833, args.altitude, 0.0],
+        [4 - half_fov, -0.833, args.altitude, 0.0],
+        [4 - half_fov, 0.0, args.altitude, 0.0],
+        [-4 + half_fov, 0.0, args.altitude, 0.0],
+        [-4 + half_fov, 0.833, args.altitude, 0.0],
+        [4 - half_fov, 0.833, args.altitude, 0.0],
+		[-4 + half_fov, 1.66, args.altitude, 0.0],
+        [4 - half_fov, 1.66, args.altitude, 0.0],
+		[-4 + half_fov, 2.5, args.altitude, 0.0],
+        [4 - half_fov, 2.5, args.altitude, 0.0]
+	]
 
     #choose waypoints
-    if args.altitude < 1.88: #boundary FOV condition
+    if args.altitude < 1.785: #boundary FOV condition
+        wps = wp_7lanes
+    elif args.altitude < 2.079: 
+        wps = wp_6lanes
+    elif args.altitude < 2.527: 
         wps = wp_5lanes
-    elif args.altitude < 2.5: 
+    elif args.altitude < 3.274: 
         wps = wp_4lanes
     else:
         wps = wp_3lanes
