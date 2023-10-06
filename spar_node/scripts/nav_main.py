@@ -222,8 +222,21 @@ class Guidance():
 
 			self.landing_location = [self.landing_location.x + self.horizontal_offset, self.landing_location.y + self.vertical_offset, self.landing_location.z, 0]
 			rospy.loginfo("ArUco Detected: %d", msg_in.data)
-			# self.pub_aruco_pose.publish(self.landing_location)
-			print(msg_in.data) #NOT WORKING
+			
+			#Publish Pose
+			pose_msg = PoseStamped()
+			pose_msg.header.stamp = rospy.Time.now()  # Set the timestamp
+			pose_msg.header.frame_id = "map"  # Set the frame ID
+			pose_msg.pose.position.x = self.landing_location[0]  # Set the X position
+			pose_msg.pose.position.y = self.landing_location[1]  # Set the Y position
+			pose_msg.pose.position.z = 0.0  # Set the Z position
+			pose_msg.pose.orientation.x = 0.0  # Set the X orientation
+			pose_msg.pose.orientation.y = 0.0  # Set the Y orientation
+			pose_msg.pose.orientation.z = 0.0  # Set the Z orientation
+			pose_msg.pose.orientation.w = 1.0  # Set the W orientation
+			self.pub_aruco_pose.publish(pose_msg)
+
+			print(msg_in.data)
 			if int(msg_in.data) == ID: 
 				self.landingID_detected = True
 				print ("Landing Location Saved")
@@ -286,6 +299,19 @@ class Guidance():
 				rospy.sleep(4)
 				self.pub_deploy.publish(0)
 				rospy.sleep(1)
+				#Publish Pose
+				pose_msg = PoseStamped()
+				pose_msg.header.stamp = rospy.Time.now()  # Set the timestamp
+				pose_msg.header.frame_id = "map"  # Set the frame ID
+				pose_msg.pose.position.x = actual_position[0]  # Set the X position
+				pose_msg.pose.position.y = actual_position[1]  # Set the Y position
+				pose_msg.pose.position.z = 0.0  # Set the Z position
+				pose_msg.pose.orientation.x = 0.0  # Set the X orientation
+				pose_msg.pose.orientation.y = 0.0  # Set the Y orientation
+				pose_msg.pose.orientation.z = 0.0  # Set the Z orientation
+				pose_msg.pose.orientation.w = 1.0  # Set the W orientation
+				self.pub_object_pose.publish(pose_msg)
+
 			if msg_in.data == "Backpack" and self.backpack_detected == False:
 				#rospy.loginfo(msg_in.data)
 				self.backpack_detected = True
@@ -295,6 +321,18 @@ class Guidance():
 				rospy.sleep(4)
 				self.pub_deploy.publish(1)
 				rospy.sleep(1)
+				#Publish Pose
+				pose_msg = PoseStamped()
+				pose_msg.header.stamp = rospy.Time.now()  # Set the timestamp
+				pose_msg.header.frame_id = "map"  # Set the frame ID
+				pose_msg.pose.position.x = actual_position[0]  # Set the X position
+				pose_msg.pose.position.y = actual_position[1]  # Set the Y position
+				pose_msg.pose.position.z = 0.0  # Set the Z position
+				pose_msg.pose.orientation.x = 0.0  # Set the X orientation
+				pose_msg.pose.orientation.y = 0.0  # Set the Y orientation
+				pose_msg.pose.orientation.z = 0.0  # Set the Z orientation
+				pose_msg.pose.orientation.w = 1.0  # Set the W orientation
+				self.pub_object_pose.publish(pose_msg)
 			
 			self.send_wp(current_location)
 			self.spar_client.wait_for_result()
