@@ -64,7 +64,7 @@ class Guidance():
 		self.waypoints = waypoints
 
 		# Display the full path
-		self.display_path(waypoints, "/mission_plan/path") #***
+		self.display_path(waypoints[0:floor(len(self.waypoints)/2)], "/mission_plan/path") #***
 
 		#Initialise states of detected items
 		self.person_detected = False
@@ -431,6 +431,10 @@ class Guidance():
 	# The main purpose is to check if a waypoint has been reached,
 	# and if so, send out the next waypoint to continue the mission
 	def check_waypoint_status(self, te):
+		#Update path to search again
+		if self.waypoint_counter == floor(len(self.waypoints)/2):
+			self.display_path(self.waypoints[floor(len(self.waypoints)/2):len(self.waypoints)], "/mission_plan/path")
+		
 		# If we're performing the ROI diversion, then don't do
 		# anything here, as this is handled in that function
 		if self.performing_roi == False:
