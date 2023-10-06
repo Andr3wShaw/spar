@@ -70,15 +70,18 @@ class Guidance():
 		self.person_detected = False
 		self.backpack_detected = False
 		self.landingID_detected = False
+		self.search_area_complete = False
 
 		self.mission_complete = False
 
+		self.horizontal_offset = 0
+		self.vertical_offset = 0
 		# Make some space to record down our current location
 		self.current_location = Point()
 		self.landing_location = self.current_location
 
 		# Set our linear and rotational velocities for the flight
-		self.vel_linear = rospy.get_param("~vel_linear", 0.5)
+		self.vel_linear = rospy.get_param("~vel_linear", 1)
 		self.vel_yaw = rospy.get_param("~vel_yaw", 0.2)
 		# Set our position and yaw waypoint accuracies
 		self.accuracy_pos = rospy.get_param("~acc_pos", 0.3)
@@ -128,11 +131,18 @@ class Guidance():
 			self.sub_object = rospy.Subscriber("/object_detection", String, self.detected_object)
 
 			self.pub_deploy = rospy.Publisher('deploy_payload', Int32, queue_size=10)
+			self.pub_aruco_pose = rospy.Publisher('aruco_pose_shifted', PoseStamped, queue_size=10)
+			self.pub_object_pose = rospy.Publisher('object_pose_shifted', PoseStamped, queue_size=10)
 
 			self.sub_aruco = rospy.Subscriber('/aruco_marker/id', Int32, self.aruco_detection)
+			self.aruco_pose_sub = rospy.Subscriber('/aruco_pose', Point, self.offset_calculation)
+			self.sub_object_pose = rospy.Subscriber('object_pose', Point, self.offset_calculation)
 
 			self.sub_position = rospy.Subscriber('mavros/local_position/pose', PoseStamped, self.callback_pose) 
 			self.sub_position = rospy.Subscriber('uavasr/pose', PoseStamped, self.callback_pose)
+
+			# self.sub_aruco_pose = rospy_Subscrber('/aruco_pose', Int32, self.aruco)
+
 
 			# Publisher to GCS
 			#self.pub_battery_warning = rospy.Subscriber("critical_battery", String, queue_size=10)#***
@@ -209,9 +219,10 @@ class Guidance():
 		global ID
 		if self.landingID_detected == False:
 			self.landing_location = self.current_location
-			self.landing_location = [self.landing_location.x, self.landing_location.y, self.landing_location.z, 0]
+
+			self.landing_location = [self.landing_location.x + self.horizontal_offset, self.landing_location.y + self.vertical_offset, self.landing_location.z, 0]
 			rospy.loginfo("ArUco Detected: %d", msg_in.data)
-			#rospy.loginfo("Marker Location: %f, %f",self.landing_location.x,self.landing_location.y)
+			# self.pub_aruco_pose.publish(self.landing_location)
 			print(msg_in.data) #NOT WORKING
 			if int(msg_in.data) == ID: 
 				self.landingID_detected = True
@@ -219,13 +230,36 @@ class Guidance():
 		else:
 			return
 		
+
+
+	def offset_calculation(self, msg_in):
+		global altitude
+		horizontal_pixels = msg_in.y
+		vertical_pixels = msg_in.x
+
+		self.horizontal_offset = ((horizontal_pixels/416) * 2 * altitude * tan(19.09)) - altitude * tan(19.09)
+		self.vertical_offset = ((vertical_pixels/416) * 2 * altitude * tan(19.09)) - altitude * tan(19.09) - 0.1
+		rospy.loginfo(self.horizontal_offset)
+		rospy.loginfo(self.vertical_offset)
+
 	def mission_complete_check(self):
-		if self.backpack_detected == True and self.person_detected == True and self.landingID_detected == True:
+		global wps_index
+		global wps_all
+
+		if self.waypoint_counter == len(wps_all[wps_index]):
+			rospy.loginfo('testing search area complete')
+			self.search_area_complete = True
+
+		if self.backpack_detected == True and self.person_detected == True and self.landingID_detected == True and self.search_area_complete == True:
 			self.mission_complete = True
+		
+		# if (self.backpack_detected == False or self.person_detected == False or self.landingID_detected == False) and self.search_area_complete == True:
+		# 	self.search_area_complete = False
+		# 	rospy.loginfo('testing restart mission')
 
 	def detected_object(self, msg_in):
 		print(msg_in.data)
-		if self.waypoint_counter >= 2:
+		if self.waypoint_counter >= 1:
 			
 			self.performing_roi = True
 			self.spar_client.cancel_goal()
@@ -236,23 +270,31 @@ class Guidance():
 
 			deployment_position = self.current_location
 			deployment_position.z = 1
-			actual_position = [deployment_position.x, deployment_position.y, deployment_position.z, 0]
+			actual_position = [deployment_position.x + self.horizontal_offset, deployment_position.y + self.vertical_offset, deployment_position.z, 0]
+			# self.pub_object_pose.publish(actual_position)
+			rospy.loginfo(f"Deployment Position: x={deployment_position.x}, y={deployment_position.y}, z={deployment_position.z}")
+			# Print actual_position
+			rospy.loginfo(f"Actual Position: x={actual_position[0]}, y={actual_position[1]}, z={actual_position[2]}, w={actual_position[3]}")
 
+			
 			if msg_in.data == "Person" and self.person_detected == False:
 				#rospy.loginfo(msg_in.data)
 				self.person_detected = True
 				#rospy.Publisher("object_detection", String, queue_size=10)
 				self.send_wp(actual_position)
 				self.spar_client.wait_for_result()
+				rospy.sleep(4)
 				self.pub_deploy.publish(0)
+				rospy.sleep(1)
 			if msg_in.data == "Backpack" and self.backpack_detected == False:
 				#rospy.loginfo(msg_in.data)
 				self.backpack_detected = True
 				#rospy.Publisher("object_detection", String, queue_size=10)
 				self.send_wp(actual_position)
 				self.spar_client.wait_for_result()
+				rospy.sleep(4)
 				self.pub_deploy.publish(1)
-			
+				rospy.sleep(1)
 			
 			self.send_wp(current_location)
 			self.spar_client.wait_for_result()
@@ -611,9 +653,10 @@ def main():
 
 	#initialise node
     rospy.init_node('guidance')
-
+    global wps_index
     global altitude
     global ID
+    global wps_all
     altitude = rospy.get_param('~altitude', 3.5)
     ID = rospy.get_param('~ID', 1)
 
@@ -704,16 +747,19 @@ def main():
     #choose waypoints
     if altitude < 1.785: #boundary FOV condition		
         wps_index = 4
+        wps = wps_all[wps_index] + wps_all[wps_index-1][::-1]
     elif altitude < 2.079:
         wps_index = 3
+        wps = wps_all[wps_index] + wps_all[wps_index+1][::-1]
     elif altitude < 2.527:
         wps_index = 2
+        wps = wps_all[wps_index] + wps_all[wps_index+1][::-1]
     elif altitude < 3.274:
         wps_index = 1
+        wps = wps_all[wps_index] + wps_all[wps_index+1][::-1]
     else:
         wps_index = 0
-
-    wps = wps_all[wps_index]
+        wps = wps_all[wps_index] + wps_all[wps_index+1][::-1]
 
 	# Create our guidance class option
     guide = Guidance(wps)
