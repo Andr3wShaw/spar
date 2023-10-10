@@ -5,6 +5,7 @@ import sys
 import runpy
 from math import *
 import time
+import numpy as np
 
 import rospy
 import actionlib
@@ -41,6 +42,7 @@ class Guidance():
 		#self.topic_battery = "/uavasr/battery"
 		self.topic_battery = "/mavros/battery"
 		#self.topic_battery = "battery"
+		
 		#####################################################################
 
 		self.critical_battery = 10 # Critical battery level
@@ -105,12 +107,15 @@ class Guidance():
 			self.send_flight_motion()	#takeoff
 
 			rospy.loginfo("Starting waypoint mission")
+			self.publish_wp_counter = rospy.Publisher('/waypoint_counter', Int32, queue_size=10)
 
 			# Setup first waypoint segment
 			# XXX:	Another option would be to do "takeoff" and leave "waypoint_counter = 0" to
 			#		begin the mission at the first waypoint after take-off
 			self.send_wp(self.waypoints[0])
 			self.waypoint_counter += 1
+			self.publish_wp_counter.publish(self.waypoint_counter)
+
 
 			# Initialisation breadcrumb wps ##################################
 			self.breadcrumbWPSnextWP = 0
@@ -140,6 +145,7 @@ class Guidance():
 
 			self.sub_position = rospy.Subscriber('mavros/local_position/pose', PoseStamped, self.callback_pose) 
 			self.sub_position = rospy.Subscriber('uavasr/pose', PoseStamped, self.callback_pose)
+
 
 			# self.sub_aruco_pose = rospy_Subscrber('/aruco_pose', Int32, self.aruco)
 
@@ -219,9 +225,7 @@ class Guidance():
 		global ID
 		if self.landingID_detected == False:
 			self.landing_location = self.current_location
-
-			self.landing_location = [self.landing_location.x + self.horizontal_offset, self.landing_location.y + self.vertical_offset, self.landing_location.z, 0]
-			rospy.loginfo("ArUco Detected: %d", msg_in.data)
+			self.landing_location = [self.landing_location.x + self.horizontal_offset, self.landing_location.y + self.vertical_offset, self.current_location.z, 0]
 			
 			#Publish Pose
 			pose_msg = PoseStamped()
@@ -239,8 +243,22 @@ class Guidance():
 			print(msg_in.data)
 			if int(msg_in.data) == ID: 
 				self.landingID_detected = True
-				print ("Landing Location Saved")
+				print (f'Landing Location Saved at X:{self.landing_location[0]} Y:{self.landing_location[1]}')
 		else:
+			self.current_location = [self.current_location.x + self.horizontal_offset, self.current_location.y + self.vertical_offset, self.current_location.z, 0]
+			rospy.loginfo(f'ArUco Detected: {msg_in.data} at X:{self.current_location[0]} Y:{self.current_location[1]}')
+			#Publish Pose
+			pose_msg = PoseStamped()
+			pose_msg.header.stamp = rospy.Time.now()  # Set the timestamp
+			pose_msg.header.frame_id = "map"  # Set the frame ID
+			pose_msg.pose.position.x = self.current_location[0]  # Set the X position
+			pose_msg.pose.position.y = self.current_location[1]  # Set the Y position
+			pose_msg.pose.position.z = 0.0  # Set the Z position
+			pose_msg.pose.orientation.x = 0.0  # Set the X orientation
+			pose_msg.pose.orientation.y = 0.0  # Set the Y orientation
+			pose_msg.pose.orientation.z = 0.0  # Set the Z orientation
+			pose_msg.pose.orientation.w = 1.0  # Set the W orientation
+			self.pub_aruco_pose.publish(pose_msg)
 			return
 		
 
@@ -250,8 +268,10 @@ class Guidance():
 		horizontal_pixels = msg_in.y
 		vertical_pixels = msg_in.x
 
-		self.horizontal_offset = ((horizontal_pixels/416) * 2 * altitude * tan(19.09)) - altitude * tan(19.09)
-		self.vertical_offset = ((vertical_pixels/416) * 2 * altitude * tan(19.09)) - altitude * tan(19.09) - 0.1
+		self.horizontal_offset = (2 * altitude * tan(19.09)) - (2 * altitude * tan(19.09) * horizontal_pixels/416) - altitude * tan(19.09)
+		self.vertical_offset = (2 * altitude * tan(19.09)) - (2 * altitude * tan(19.09) * vertical_pixels/416) - altitude * tan(19.09) - 0.1
+
+
 		rospy.loginfo(self.horizontal_offset)
 		rospy.loginfo(self.vertical_offset)
 
@@ -260,7 +280,7 @@ class Guidance():
 		global wps_all
 
 		if self.waypoint_counter == len(wps_all[wps_index]):
-			rospy.loginfo('testing search area complete')
+			# rospy.loginfo('testing search area complete')
 			self.search_area_complete = True
 
 		if self.backpack_detected == True and self.person_detected == True and self.landingID_detected == True and self.search_area_complete == True:
@@ -272,79 +292,82 @@ class Guidance():
 
 	def detected_object(self, msg_in):
 		print(msg_in.data)
-		if self.waypoint_counter >= 1:
-			
-			self.performing_roi = True
-			self.spar_client.cancel_goal()
+		# if self.waypoint_counter > 0 :
+		
+		self.performing_roi = True
+		self.spar_client.cancel_goal()
 
-			current_location = self.current_location
-			current_location = [self.current_location.x, self.current_location.y, self.current_location.z, 0]
+		current_location = self.current_location
+		current_location = [self.current_location.x, self.current_location.y, self.current_location.z, 0]
 
+		deployment_position = self.current_location
+		deployment_position.z = 1
 
-			deployment_position = self.current_location
-			deployment_position.z = 1
-			actual_position = [deployment_position.x + self.horizontal_offset, deployment_position.y + self.vertical_offset, deployment_position.z, 0]
-			# self.pub_object_pose.publish(actual_position)
-			rospy.loginfo(f"Deployment Position: x={deployment_position.x}, y={deployment_position.y}, z={deployment_position.z}")
-			# Print actual_position
-			rospy.loginfo(f"Actual Position: x={actual_position[0]}, y={actual_position[1]}, z={actual_position[2]}, w={actual_position[3]}")
+		actual_position = [deployment_position.x + self.horizontal_offset, deployment_position.y + self.vertical_offset, deployment_position.z, 0]
+		# self.pub_object_pose.publish(actual_position)
+		rospy.loginfo(f"Deployment Position: x={deployment_position.x}, y={deployment_position.y}, z={deployment_position.z}")
+		# Print actual_position
+		rospy.loginfo(f"Actual Position: x={actual_position[0]}, y={actual_position[1]}, z={actual_position[2]}, w={actual_position[3]}")
+	
+		if msg_in.data == "Person" and self.person_detected == False:
+			#rospy.loginfo(msg_in.data)
+			self.person_detected = True
+			#rospy.Publisher("object_detection", String, queue_size=10)
+			self.send_wp(actual_position)
 
-			
-			if msg_in.data == "Person" and self.person_detected == False:
-				#rospy.loginfo(msg_in.data)
-				self.person_detected = True
-				#rospy.Publisher("object_detection", String, queue_size=10)
-				self.send_wp(actual_position)
-				self.spar_client.wait_for_result()
-				rospy.sleep(4)
-				self.pub_deploy.publish(0)
-				rospy.sleep(1)
-				#Publish Pose
-				pose_msg = PoseStamped()
-				pose_msg.header.stamp = rospy.Time.now()  # Set the timestamp
-				pose_msg.header.frame_id = "map"  # Set the frame ID
-				pose_msg.pose.position.x = actual_position[0]  # Set the X position
-				pose_msg.pose.position.y = actual_position[1]  # Set the Y position
-				pose_msg.pose.position.z = 0.0  # Set the Z position
-				pose_msg.pose.orientation.x = 0.0  # Set the X orientation
-				pose_msg.pose.orientation.y = 0.0  # Set the Y orientation
-				pose_msg.pose.orientation.z = 0.0  # Set the Z orientation
-				pose_msg.pose.orientation.w = 1.0  # Set the W orientation
-				self.pub_object_pose.publish(pose_msg)
+			#Publish Pose
+			pose_msg = PoseStamped()
+			pose_msg.header.stamp = rospy.Time.now()  # Set the timestamp
+			pose_msg.header.frame_id = "map"  # Set the frame ID
+			pose_msg.pose.position.x = actual_position[0]  # Set the X position
+			pose_msg.pose.position.y = actual_position[1]  # Set the Y position
+			pose_msg.pose.position.z = 0.0  # Set the Z position
+			pose_msg.pose.orientation.x = 0.0  # Set the X orientation
+			pose_msg.pose.orientation.y = 0.0  # Set the Y orientation
+			pose_msg.pose.orientation.z = 0.0  # Set the Z orientation
+			pose_msg.pose.orientation.w = 1.0  # Set the W orientation
+			self.pub_object_pose.publish(pose_msg)
 
-			if msg_in.data == "Backpack" and self.backpack_detected == False:
-				#rospy.loginfo(msg_in.data)
-				self.backpack_detected = True
-				#rospy.Publisher("object_detection", String, queue_size=10)
-				self.send_wp(actual_position)
-				self.spar_client.wait_for_result()
-				rospy.sleep(4)
-				self.pub_deploy.publish(1)
-				rospy.sleep(1)
-				#Publish Pose
-				pose_msg = PoseStamped()
-				pose_msg.header.stamp = rospy.Time.now()  # Set the timestamp
-				pose_msg.header.frame_id = "map"  # Set the frame ID
-				pose_msg.pose.position.x = actual_position[0]  # Set the X position
-				pose_msg.pose.position.y = actual_position[1]  # Set the Y position
-				pose_msg.pose.position.z = 0.0  # Set the Z position
-				pose_msg.pose.orientation.x = 0.0  # Set the X orientation
-				pose_msg.pose.orientation.y = 0.0  # Set the Y orientation
-				pose_msg.pose.orientation.z = 0.0  # Set the Z orientation
-				pose_msg.pose.orientation.w = 1.0  # Set the W orientation
-				self.pub_object_pose.publish(pose_msg)
-			
-			self.send_wp(current_location)
 			self.spar_client.wait_for_result()
-			if self.spar_client.get_state() != GoalStatus.SUCCEEDED:
-				# Something went wrong, cancel out of guidance!
-				rospy.signal_shutdown("cancelled")
-				return
+			rospy.sleep(4)
+			self.pub_deploy.publish(0)
+			rospy.sleep(1)
+			
 
-			self.send_wp(self.waypoints[self.waypoint_counter])
-			self.performing_roi = False
-		else:
+		if msg_in.data == "Backpack" and self.backpack_detected == False:
+			#rospy.loginfo(msg_in.data)
+			self.backpack_detected = True
+			#rospy.Publisher("object_detection", String, queue_size=10)
+			self.send_wp(actual_position)
+
+			#Publish Pose
+			pose_msg = PoseStamped()
+			pose_msg.header.stamp = rospy.Time.now()  # Set the timestamp
+			pose_msg.header.frame_id = "map"  # Set the frame ID
+			pose_msg.pose.position.x = actual_position[0]  # Set the X position
+			pose_msg.pose.position.y = actual_position[1]  # Set the Y position
+			pose_msg.pose.position.z = 0.0  # Set the Z position
+			pose_msg.pose.orientation.x = 0.0  # Set the X orientation
+			pose_msg.pose.orientation.y = 0.0  # Set the Y orientation
+			pose_msg.pose.orientation.z = 0.0  # Set the Z orientation
+			pose_msg.pose.orientation.w = 1.0  # Set the W orientation
+			self.pub_object_pose.publish(pose_msg)
+
+			self.spar_client.wait_for_result()
+			rospy.sleep(4)
+			self.pub_deploy.publish(1)
+			rospy.sleep(1)
+		
+		self.send_wp(current_location)
+		self.spar_client.wait_for_result()
+		if self.spar_client.get_state() != GoalStatus.SUCCEEDED:
+			# Something went wrong, cancel out of guidance!
+			rospy.signal_shutdown("cancelled")
 			return
+
+		self.send_wp(self.waypoints[self.waypoint_counter])
+		self.performing_roi = False
+
 
 	# This function will fire whenever a ROI pose message is sent
 	# It is also responsible for handling the ROI "inspection task"
@@ -473,6 +496,8 @@ class Guidance():
 		if self.waypoint_counter == floor(len(self.waypoints)/2):
 			self.display_path(self.waypoints[floor(len(self.waypoints)/2):len(self.waypoints)], "/mission_plan/path")
 		
+		self.publish_wp_counter.publish(self.waypoint_counter)
+		
 		# If we're performing the ROI diversion, then don't do
 		# anything here, as this is handled in that function
 		if self.performing_roi == False:
@@ -561,6 +586,8 @@ class Guidance():
 						else:
 							# If we are done with breadcrumb wps 
 							self.waypoint_counter += 1 # Increment survey waypoint counter
+							
+
 							self.breadcrumbMode = False
 			# 	else:
 			# 		# Else the mission is over, shutdown and quit the node
