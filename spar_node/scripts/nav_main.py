@@ -76,14 +76,18 @@ class Guidance():
 
 		self.mission_complete = False
 
+		self.horizontal_pixels = 0
+		self.vertical_pixels = 0
+
 		self.horizontal_offset = 0
 		self.vertical_offset = 0
 		# Make some space to record down our current location
-		self.current_location = Point()
-		self.landing_location = self.current_location
+		self.current_location = []
+		self.landing_location = []
+		self.aruco_location = []
 
 		# Set our linear and rotational velocities for the flight
-		self.vel_linear = rospy.get_param("~vel_linear", 1)
+		self.vel_linear = rospy.get_param("~vel_linear", 0.6)
 		self.vel_yaw = rospy.get_param("~vel_yaw", 0.2)
 		# Set our position and yaw waypoint accuracies
 		self.accuracy_pos = rospy.get_param("~acc_pos", 0.3)
@@ -113,7 +117,7 @@ class Guidance():
 			# XXX:	Another option would be to do "takeoff" and leave "waypoint_counter = 0" to
 			#		begin the mission at the first waypoint after take-off
 			self.send_wp(self.waypoints[0])
-			self.waypoint_counter += 1
+			# self.waypoint_counter += 1
 			self.publish_wp_counter.publish(self.waypoint_counter)
 
 
@@ -140,8 +144,8 @@ class Guidance():
 			self.pub_object_pose = rospy.Publisher('object_pose_shifted', PoseStamped, queue_size=10)
 
 			self.sub_aruco = rospy.Subscriber('/aruco_marker/id', Int32, self.aruco_detection)
-			self.aruco_pose_sub = rospy.Subscriber('/aruco_pose', Point, self.offset_calculation)
-			self.sub_object_pose = rospy.Subscriber('object_pose', Point, self.offset_calculation)
+			self.aruco_pose_sub = rospy.Subscriber('/aruco_pose', Point, self.get_offset)
+			self.sub_object_pose = rospy.Subscriber('object_pose', Point, self.get_offset)
 
 			self.sub_position = rospy.Subscriber('mavros/local_position/pose', PoseStamped, self.callback_pose) 
 			self.sub_position = rospy.Subscriber('uavasr/pose', PoseStamped, self.callback_pose)
@@ -224,8 +228,11 @@ class Guidance():
 	def aruco_detection(self, msg_in):
 		global ID
 		if self.landingID_detected == False:
-			self.landing_location = self.current_location
-			self.landing_location = [self.landing_location.x + self.horizontal_offset, self.landing_location.y + self.vertical_offset, self.current_location.z, 0]
+			self.offset_calculation()
+			# current_location = self.current_location
+			current_location = [self.current_location.x, self.current_location.y, self.current_location.z, 0]
+			
+			self.landing_location = [current_location[0] + self.vertical_offset, current_location[1] + self.horizontal_offset, 0.1, 0]
 			
 			#Publish Pose
 			pose_msg = PoseStamped()
@@ -242,17 +249,19 @@ class Guidance():
 
 			print(msg_in.data)
 			if int(msg_in.data) == ID: 
+				print(current_location[0], current_location[1])
 				self.landingID_detected = True
 				print (f'Landing Location Saved at X:{self.landing_location[0]} Y:{self.landing_location[1]}')
 		else:
-			self.current_location = [self.current_location.x + self.horizontal_offset, self.current_location.y + self.vertical_offset, self.current_location.z, 0]
-			rospy.loginfo(f'ArUco Detected: {msg_in.data} at X:{self.current_location[0]} Y:{self.current_location[1]}')
+			self.offset_calculation()
+			self.aruco_location = [self.current_location.x + self.horizontal_offset, self.current_location.y + self.vertical_offset, 0, 0]
+			rospy.loginfo(f'ArUco Detected: {msg_in.data} at X:{self.aruco_location[0]} Y:{self.aruco_location[1]}')
 			#Publish Pose
 			pose_msg = PoseStamped()
 			pose_msg.header.stamp = rospy.Time.now()  # Set the timestamp
 			pose_msg.header.frame_id = "map"  # Set the frame ID
-			pose_msg.pose.position.x = self.current_location[0]  # Set the X position
-			pose_msg.pose.position.y = self.current_location[1]  # Set the Y position
+			pose_msg.pose.position.x = self.aruco_location[0]  # Set the X position
+			pose_msg.pose.position.y = self.aruco_location[1]  # Set the Y position
 			pose_msg.pose.position.z = 0.0  # Set the Z position
 			pose_msg.pose.orientation.x = 0.0  # Set the X orientation
 			pose_msg.pose.orientation.y = 0.0  # Set the Y orientation
@@ -262,18 +271,23 @@ class Guidance():
 			return
 		
 
-
-	def offset_calculation(self, msg_in):
+	def get_offset(self, msg_in):
 		global altitude
-		horizontal_pixels = msg_in.y
-		vertical_pixels = msg_in.x
+		self.horizontal_pixels = msg_in.x
+		self.vertical_pixels = msg_in.y
+		print(self.horizontal_pixels)
+		print(self.vertical_pixels)
+		# rospy.loginfo(horizontal_pixels)
+		# rospy.loginfo(vertical_pixels)
 
-		self.horizontal_offset = (2 * altitude * tan(19.09)) - (2 * altitude * tan(19.09) * horizontal_pixels/416) - altitude * tan(19.09)
-		self.vertical_offset = (2 * altitude * tan(19.09)) - (2 * altitude * tan(19.09) * vertical_pixels/416) - altitude * tan(19.09) - 0.1
+		# rospy.loginfo(self.horizontal_offset)
+		# rospy.loginfo(self.vertical_offset)
 
-
-		rospy.loginfo(self.horizontal_offset)
-		rospy.loginfo(self.vertical_offset)
+	def offset_calculation(self):
+		self.horizontal_offset = (2 * altitude * tan(19.09)) - (2 * altitude * tan(19.09) * self.horizontal_pixels/416) - altitude * tan(19.09)
+		self.vertical_offset = (2 * altitude * tan(19.09)) - (2 * altitude * tan(19.09) * self.vertical_pixels/416) - altitude * tan(19.09) - 0.1
+		print(self.horizontal_offset)
+		print(self.vertical_offset)
 
 	def mission_complete_check(self):
 		global wps_index
@@ -297,15 +311,17 @@ class Guidance():
 		self.performing_roi = True
 		self.spar_client.cancel_goal()
 
-		current_location = self.current_location
+		# current_location = self.current_location
 		current_location = [self.current_location.x, self.current_location.y, self.current_location.z, 0]
 
-		deployment_position = self.current_location
-		deployment_position.z = 1
 
-		actual_position = [deployment_position.x + self.horizontal_offset, deployment_position.y + self.vertical_offset, deployment_position.z, 0]
+		self.offset_calculation()
+		deployment_position = current_location
+		# deployment_position.z = 0.5
+
+		actual_position = [deployment_position[0] + self.vertical_offset, deployment_position[1] + self.horizontal_offset, 0.5, 0]
 		# self.pub_object_pose.publish(actual_position)
-		rospy.loginfo(f"Deployment Position: x={deployment_position.x}, y={deployment_position.y}, z={deployment_position.z}")
+		rospy.loginfo(f"Deployment Position: x={deployment_position[0]}, y={deployment_position[1]}, z={deployment_position[2]}")
 		# Print actual_position
 		rospy.loginfo(f"Actual Position: x={actual_position[0]}, y={actual_position[1]}, z={actual_position[2]}, w={actual_position[3]}")
 	
