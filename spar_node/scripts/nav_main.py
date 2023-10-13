@@ -64,9 +64,10 @@ class Guidance():
 
 		# Save the input waypoints
 		self.waypoints = waypoints
-
+		
+		global first_path_ewp
 		# Display the full path
-		self.display_path(waypoints[0:floor(len(self.waypoints)/2)], "/mission_plan/path") #***
+		self.display_path(waypoints[0:first_path_ewp], "/mission_plan/path") #***
 
 		#Initialise states of detected items
 		self.person_detected = False
@@ -508,9 +509,10 @@ class Guidance():
 	# The main purpose is to check if a waypoint has been reached,
 	# and if so, send out the next waypoint to continue the mission
 	def check_waypoint_status(self, te):
-		#Update path to search again
-		if self.waypoint_counter == floor(len(self.waypoints)/2):
-			self.display_path(self.waypoints[floor(len(self.waypoints)/2):len(self.waypoints)], "/mission_plan/path")
+		global first_path_ewp
+  		#Update path to search again
+		if self.waypoint_counter == first_path_ewp:
+			self.display_path(self.waypoints[first_path_ewp:len(self.waypoints)], "/mission_plan/path")
 		
 		self.publish_wp_counter.publish(self.waypoint_counter)
 		
@@ -704,7 +706,7 @@ class Guidance():
 
 	def display_path(self, wps, name):
 		#def display_path(wps):
-		rospy.loginfo("Diplaying braeacrumb path")
+		rospy.loginfo("Diplaying breadcrumb path")
 		#pub_path = rospy.Publisher("/mission_plan/path", Path, queue_size=10, latch=True)
 		pub_path = rospy.Publisher(name, Path, queue_size=10, latch=True)
 		msg = Path()
@@ -742,6 +744,7 @@ def main():
     global altitude
     global ID
     global wps_all
+    global first_path_ewp
     altitude = rospy.get_param('~altitude', 3.5)
     ID = rospy.get_param('~ID', 1)
 
@@ -830,21 +833,27 @@ def main():
     
     wps_all = [wp_3lanes, wp_4lanes, wp_5lanes, wp_6lanes, wp_7lanes]
     #choose waypoints
+    #20-22 waypoints altogether
     if altitude < 1.785: #boundary FOV condition		
         wps_index = 4
-        wps = wps_all[wps_index] + wps_all[wps_index-1][::-1]
+        wps = wps_all[wps_index] + wps_all[1][::-1]
+        first_path_ewp = 14
     elif altitude < 2.079:
         wps_index = 3
-        wps = wps_all[wps_index] + wps_all[wps_index+1][::-1]
+        wps = wps_all[wps_index] + wps_all[2][::-1]
+        first_path_ewp = 12
     elif altitude < 2.527:
         wps_index = 2
-        wps = wps_all[wps_index] + wps_all[wps_index+1][::-1]
+        wps = wps_all[wps_index] + wps_all[3][::-1]
+        first_path_ewp = 10
     elif altitude < 3.274:
         wps_index = 1
-        wps = wps_all[wps_index] + wps_all[wps_index+1][::-1]
+        wps = wps_all[wps_index] + wps_all[4][::-1]
+        first_path_ewp = 8
     else:
         wps_index = 0
-        wps = wps_all[wps_index] + wps_all[wps_index+1][::-1]
+        wps = wps_all[wps_index] + wps_all[4][::-1]
+        first_path_ewp = 6
 
 	# Create our guidance class option
     guide = Guidance(wps)
